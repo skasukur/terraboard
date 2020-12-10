@@ -10,6 +10,7 @@ import (
 	"github.com/camptocamp/terraboard/config"
 	"github.com/camptocamp/terraboard/state"
 	"github.com/camptocamp/terraboard/types"
+	"github.com/hashicorp/terraform/addrs"
 	"github.com/hashicorp/terraform/states"
 	"github.com/hashicorp/terraform/states/statefile"
 	log "github.com/sirupsen/logrus"
@@ -54,6 +55,7 @@ func (db *Database) stateS3toDB(sf *statefile.File, path string, versionID strin
 		Version:   version,
 		TFVersion: sf.TerraformVersion.String(),
 		Serial:    int64(sf.Serial),
+		Lineage:   sf.Lineage,
 	}
 
 	for _, m := range sf.State.Modules {
@@ -61,20 +63,29 @@ func (db *Database) stateS3toDB(sf *statefile.File, path string, versionID strin
 			Path: m.Addr.String(),
 		}
 		for _, r := range m.Resources {
-			res := types.Resource{
-				Type: r.Addr.Type,
-				Name: r.Addr.Name,
+			for index, i := range r.Instances {
+				res := types.Resource{
+					Type:       r.Addr.Resource.Type,
+					Name:       r.Addr.Resource.Name,
+					Index:      getResourceIndex(index),
+					Attributes: marshalAttributeValues(i.Current),
+				}
+				mod.Resources = append(mod.Resources, res)
 			}
 
-			for _, i := range r.Instances {
-				res.Attributes = marshalAttributeValues(i.Current)
-			}
-
-			mod.Resources = append(mod.Resources, res)
 		}
 		st.Modules = append(st.Modules, mod)
 	}
 	return
+}
+
+// getResourceIndex transforms an addrs.InstanceKey instance into a string representation
+func getResourceIndex(index addrs.InstanceKey) string {
+	switch index.(type) {
+	case addrs.IntKey, addrs.StringKey:
+		return index.String()
+	}
+	return ""
 }
 
 func marshalAttributeValues(src *states.ResourceInstanceObjectSrc) (attrs []types.Attribute) {
@@ -84,7 +95,9 @@ func marshalAttributeValues(src *states.ResourceInstanceObjectSrc) (attrs []type
 			vals[k] = v
 		}
 	} else {
-		json.Unmarshal(src.AttrsJSON, &vals)
+		if err := json.Unmarshal(src.AttrsJSON, &vals); err != nil {
+			log.Error(err.Error())
+		}
 	}
 	log.Debug(vals)
 
@@ -155,7 +168,9 @@ func (db *Database) KnownVersions() (versions []string) {
 	defer rows.Close()
 	for rows.Next() {
 		var version string
-		rows.Scan(&version) // TODO: err
+		if err := rows.Scan(&version); err != nil {
+			log.Error(err.Error())
+		}
 		versions = append(versions, version)
 	}
 	return
@@ -221,13 +236,15 @@ func (db *Database) SearchAttribute(query url.Values) (results []types.SearchRes
 
 	// Count everything
 	row := db.Raw("SELECT count(*)"+sqlQuery, params...).Row()
-	row.Scan(&total)
+	if err := row.Scan(&total); err != nil {
+		log.Error(err.Error())
+	}
 
 	// Now get results
 	// gorm doesn't support subqueries...
-	sql := "SELECT states.path, states.version_id, states.tf_version, states.serial, modules.path as module_path, resources.type, resources.name, attributes.key, attributes.value" +
+	sql := "SELECT states.path, states.version_id, states.tf_version, states.serial, modules.path as module_path, resources.type, resources.name, resources.index, attributes.key, attributes.value" +
 		sqlQuery +
-		" ORDER BY states.path, states.serial, modules.path, resources.type, resources.name, attributes.key" +
+		" ORDER BY states.path, states.serial, modules.path, resources.type, resources.name, resources.index, attributes.key" +
 		" LIMIT ?"
 
 	params = append(params, pageSize)
@@ -257,7 +274,9 @@ func (db *Database) ListStatesVersions() (statesVersions map[string][]string) {
 	for rows.Next() {
 		var path string
 		var versionID string
-		rows.Scan(&path, &versionID)
+		if err := rows.Scan(&path, &versionID); err != nil {
+			log.Error(err.Error())
+		}
 		statesVersions[versionID] = append(statesVersions[versionID], path)
 	}
 	return
@@ -269,7 +288,9 @@ func (db *Database) ListStates() (states []string) {
 	defer rows.Close()
 	for rows.Next() {
 		var state string
-		rows.Scan(&state)
+		if err := rows.Scan(&state); err != nil {
+			log.Error(err.Error())
+		}
 		states = append(states, state)
 	}
 	return
@@ -302,7 +323,9 @@ func (db *Database) ListTerraformVersionsWithCount(query url.Values) (results []
 		var name string
 		var count string
 		r := make(map[string]string)
-		rows.Scan(&name, &count)
+		if err = rows.Scan(&name, &count); err != nil {
+			return
+		}
 		r["name"] = name
 		r["count"] = count
 		results = append(results, r)
@@ -313,7 +336,9 @@ func (db *Database) ListTerraformVersionsWithCount(query url.Values) (results []
 // ListStateStats returns a slice of StateStat, along with paging information
 func (db *Database) ListStateStats(query url.Values) (states []types.StateStat, page int, total int) {
 	row := db.Table("states").Select("count(DISTINCT path)").Row()
-	row.Scan(&total)
+	if err := row.Scan(&total); err != nil {
+		log.Error(err.Error())
+	}
 
 	offset := 0
 	page = 1
@@ -345,7 +370,9 @@ func (db *Database) listField(table, field string) (results []string, err error)
 
 	for rows.Next() {
 		var t string
-		rows.Scan(&t)
+		if err = rows.Scan(&t); err != nil {
+			return
+		}
 		results = append(results, t)
 	}
 
@@ -366,7 +393,9 @@ func (db *Database) listFieldWithCount(table, field string) (results []map[strin
 		var name string
 		var count string
 		r := make(map[string]string)
-		rows.Scan(&name, &count)
+		if err = rows.Scan(&name, &count); err != nil {
+			return
+		}
 		r["name"] = name
 		r["count"] = count
 		results = append(results, r)
@@ -403,7 +432,9 @@ func (db *Database) ListResourceTypesWithCount() (results []map[string]string, e
 		var name string
 		var count string
 		r := make(map[string]string)
-		rows.Scan(&name, &count)
+		if err = rows.Scan(&name, &count); err != nil {
+			return
+		}
 		r["name"] = name
 		r["count"] = count
 		results = append(results, r)
@@ -440,7 +471,9 @@ func (db *Database) ListAttributeKeys(resourceType string) (results []string, er
 
 	for rows.Next() {
 		var t string
-		rows.Scan(&t)
+		if err = rows.Scan(&t); err != nil {
+			return
+		}
 		results = append(results, t)
 	}
 
@@ -457,6 +490,6 @@ func (db *Database) DefaultVersion(path string) (version string, err error) {
 		" WHERE states.path = ?"
 
 	row := db.Raw(sqlQuery, path).Row()
-	row.Scan(&version)
+	err = row.Scan(&version)
 	return
 }

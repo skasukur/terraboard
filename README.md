@@ -120,41 +120,66 @@ The precedence of configurations is as described below.
 |`--tfe-address` | `TFE_ADDRESS` | `tfe.tfe-address` | Terraform Enterprise address for states access | - |
 |`--tfe-token` | `TFE_TOKEN` | `tfe.tfe-token` | Terraform Enterprise token for states access | - |
 |`--tfe-organization` | `TFE_ORGANIZATION` | `tfe.tfe-organization` | Terraform Enterprise organization for states access | - |
+|`--gcs-bucket` | `N/A` | `gcp.gcs-buckets` | Google Cloud Storage buckets to access | - |
+|`--gcp-sa-key-path` | `GCP_SA_KEY_PATH` | `gcp.gcp-sa-key-path` | Path to the service account key to use for Google Cloud Storage | - |
 
 ## Use with Docker
 
-Either use the included docker-compose file, or run two containers from the commandline:
-the app itself and a PostgreSQL database for it to store information in.
+### Docker-compose
+
+Configuration file can be provided to the container using a [volume](https://docs.docker.com/compose/compose-file/#volumes) or a [configuration](https://docs.docker.com/compose/compose-file/#configs).
 
 ```shell
 # Set AWS credentials as environment variables:
 export AWS_ACCESS_KEY_ID=<access_key>
 export AWS_SECRET_ACCESS_KEY=<access_secret>
-# Spin up the two containers and a network for them to communciate on:
-docker network create terranet
-docker run --name db \
-  -e POSTGRES_USER=gorm \
-  -e POSTGRES_DB=gorm \
-  -e POSTGRES_PASSWORD="<mypassword>" \
-   --net terranet \
-  --restart=always postgres -d
-docker run -p 8080:8080 \
- -e AWS_REGION="<region>" \
- -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
- -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
- -e AWS_BUCKET="<bucket>" \
- -e AWS_DYNAMODB_TABLE="<table>" \
- -e DB_PASSWORD="<mypassword>" \
- -e APP_ROLE_ARN="<myrolearn>" \
- --net terranet \
- camptocamp/terraboard:latest
+
+# Set AWS configuration as environment variables:
+export AWS_DEFAULT_REGION=<AWS default region>
+export AWS_BUCKET=<S3 Bucket name>
+export AWS_DYNAMODB_TABLE=<Aws DynamoDB Table>
+
+docker-compose up
 ```
 
 Then point your browser to http://localhost:8080.
 
-To use the included compose file, you will need to configure an [OAuth application](https://developer.github.com/apps/building-oauth-apps/).
+### Docker command line
 
-Configuration file can be provided to the container using a [volume](https://docs.docker.com/compose/compose-file/#volumes) or a [configuration](https://docs.docker.com/compose/compose-file/#configs).
+```shell
+# Set AWS credentials as environment variables:
+export AWS_ACCESS_KEY_ID=<access_key>
+export AWS_SECRET_ACCESS_KEY=<access_secret>
+
+# Set AWS configuration as environment variables:
+export AWS_DEFAULT_REGION=<AWS default region>
+export AWS_BUCKET=<S3 Bucket name>
+export AWS_DYNAMODB_TABLE=<AWS_DYNAMODB_TABLE>
+
+# Spin up the two containers and a network for them to communciate on:
+docker network create terraboard
+docker run --name db \
+  -e POSTGRES_USER=gorm \
+  -e POSTGRES_DB=gorm \
+  -e POSTGRES_PASSWORD="<mypassword>" \
+  --net terraboard \
+  --detach \
+  --restart=always \
+  postgres:9.5
+
+docker run -p 8080:8080 \
+  -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+  -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+  -e AWS_REGION="${AWS_DEFAULT_REGION}" \
+  -e AWS_BUCKET="${AWS_BUCKET}" \
+  -e WS_DYNAMODB_TABLE="${AWS_DYNAMODB_TABLE}" \
+  -e DB_PASSWORD="<mypassword>" \
+  -e DB_SSLMODE="disable" \
+  --net terraboard \
+  camptocamp/terraboard:latest
+```
+
+Then point your browser to http://localhost:8080.
 
 ## Use with Rancher
 
@@ -191,7 +216,9 @@ $ go get github.com/camptocamp/terraboard
 | 0.17.0   |  0.12.18            |
 | 0.18.0   |  0.12.18            |
 | 0.19.0   |  0.12.20            |
-| 0.20.0   |  0.12.24            |
+| 0.20.0   |  0.12.26            |
+| 0.21.0   |  0.12.28            |
+| 0.22.0   |  0.13.0             |
 
 ## Development
 
@@ -229,8 +256,3 @@ $ docker-compose build && docker-compose up -d
 
 
 See [CONTRIBUTING.md](CONTRIBUTING.md)
-
-
-## Terraboard Logo
-
-The Terraboard logo is based on [an image by Daniel R. Strebe, CC BY-SA 3.0, 15 August 2011](https://en.wikipedia.org/wiki/Azimuthal_equidistant_projection#/media/File:Azimuthal_equidistant_projection_SW.jpg)
